@@ -1,16 +1,13 @@
 import os
 import argparse
+from collections import Counter
 import numpy as np
 import pandas as pd
 import nltk
-from nltk.tokenize import word_tokenize
-from nltk.stem import PorterStemmer
-
-stemmer = PorterStemmer()
-
-def tokenize_and_stem(text_series):
-    """Tokenize and stem a pandas Series of text."""
-    return text_series.apply(lambda x: [stemmer.stem(word.lower()) for word in word_tokenize(x)])
+# from nltk.tokenize import word_tokenize
+# from nltk.stem import PorterStemmer
+import spacy
+nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
 
 
 def most_freq(tokens_series, top_n):
@@ -21,7 +18,7 @@ def most_freq(tokens_series, top_n):
 
 
 def initialize_word_sets(filepath):
-    """Initialize the attorney and client's frequent word list."""
+    """Initialize the attorney and client's frequent word set."""
     try:
         att_label = pd.read_csv(filepath)[:200]
     except FileNotFoundError as e:
@@ -30,30 +27,31 @@ def initialize_word_sets(filepath):
     att_post = att_label[att_label.true_label == 1]['PostText']
     cli_post = att_label[att_label.true_label == 0]['PostText']
 
-    att_tokens = tokenize_and_stem(att_post)
-    cli_tokens = tokenize_and_stem(cli_post)
+    att_tokens = preprocess_text(att_post)
+    cli_tokens = preprocess_text(cli_post)
 
     att_set_30 = most_freq(att_tokens, 30)
     att_set_50 = most_freq(att_tokens, 50)
     cli_set_30 = most_freq(cli_tokens, 30)
     cli_set_50 = most_freq(cli_tokens, 50)
 
-    att_words = list(att_set_50 - cli_set_30)
-    cli_words = list(cli_set_50 - att_set_30)
+    att_words = Counter(att_set_50 - cli_set_30)
+    cli_words = Counter(cli_set_50 - att_set_30)
 
     return att_words, cli_words
 
 
-def count_att_cli_words(tokens):
+def count_att_cli_words(text):
     """Determines the label based on the count of attorney and client words in tokens. Return 1 if attorney words are more frequent."""
-    attorney_count = sum(token in ATT_WORDS for token in tokens)
-    client_count = sum(token in CLI_WORDS for token in tokens)
+    word_counter = Counter(text)
+    attorney_count = len(word_counter & ATT_WORDS)
+    client_count = len(word_counter & CLI_WORDS)
     if attorney_count > client_count:
         return 1
     elif attorney_count < client_count:
         return 0
     else:
-        return int(len(tokens) > 10)
+        return int(len(word_counter) > 10)
 
 
 def convert_format(d):
@@ -115,13 +113,20 @@ def preprocess_text(text_series):
     """
     Preprocess texts with following steps:
     # TODO: Updates this method
+    This function keeps tokens in list format for each posts.
+
     Args:
         text_series (pd.Series): A Series of text strings to preprocess.
 
     Returns:
         pd.Series: A Series where each text string is replaced by a single string with stemmed and lowercased words.
     """
-    return text_series.apply(lambda text: ' '.join([stemmer.stem(word.lower()) for word in word_tokenize(text)]))
+    # return text_series.apply(lambda text: ' '.join([stemmer.stem(word.lower()) for word in word_tokenize(text)]))
+    tokenized_docs = []
+    for doc in nlp.pipe(text_series, n_process=-1):
+        tokens = [token.lemma_.lower() for token in doc if not token.is_space]
+        tokenized_docs.append(tokens)
+    return pd.Series(tokenized_docs)
 
 
 def label_posts(post):
@@ -138,17 +143,23 @@ def label_posts(post):
         Updates the 'WhosePost' column in the 'post' DataFrame in place.
     """
     # Time-based matching with attorney time entries
+    print("time-based")
     time_diff = post['EnteredOnUtc'] - post['CreatedUtc']
     within_time_frame = time_diff.abs() <= pd.Timedelta(minutes=1)
     post['WhosePost'] = np.where(within_time_frame, 1, np.nan)
 
     # Identification of the first post for each question
+    print("position-based")
     first_posts = post.groupby('QuestionUno')['CreatedUtc'].idxmin()
     post.loc[post.index.isin(first_posts), 'WhosePost'] = 0
 
     # Comparison of attorney and client word counts
+    print("word-based")
     unlabeled = post['WhosePost'].isna()
-    post.loc[unlabeled, 'WhosePost'] = post.loc[unlabeled, 'WhosePost'].apply(count_att_cli_words)
+    post.loc[unlabeled, 'WhosePost'] = post.loc[unlabeled, 'CleanedText'].apply(count_att_cli_words)
+
+    # Join the token list back to text
+    post['CleanedText'] = post['CleanedText'].apply(lambda d: " ".join(token for token in d))
 
 
 def main(args):
