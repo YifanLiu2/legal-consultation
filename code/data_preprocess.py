@@ -68,9 +68,10 @@ def clean_dates(df, column):
     df[column] = pd.to_datetime(df[column], errors='coerce')
 
 
-def prepare_datasets(filepath, nrows):
+def prepare_datasets(filepath: str, nrows: int | None) -> tuple[pd.DataFrame]:
     """
-    Reads post, question, and attorney time entry datasets from a specified filepath, merge them together, and
+    Reads post, question, and attorney time entry datasets from a specified filepath;
+    merge question and post dataframe;
     cleans date columns.
 
     Args:
@@ -78,7 +79,7 @@ def prepare_datasets(filepath, nrows):
         nrows (int | None): The number of rows to load from question dataset.
 
     Returns:
-        tuple: Merged posts DataFrame.
+        tuple: Merged posts DataFrame and attorney time DataFrame.
 
     Raises:
         FileNotFoundError: If any of the CSV files are not found at the specified filepath.
@@ -92,24 +93,21 @@ def prepare_datasets(filepath, nrows):
         return
     question = question[["StateAbbr", "QuestionUno", "CategoryUno", "TakenByAttorneyUno"]]
     question = question[question['TakenByAttorneyUno'].notna()]
-    question = question[question['StateAbbr'] == "IN"]
 
     chunks = []
-    for chunk in pd.read_csv(os.path.join(filepath, "questionposts.csv"), index_col=0, chunksize=10000, usecols=["QuestionUno", "PostText", "CreatedUtc"]):
+    for chunk in pd.read_csv(os.path.join(filepath, "questionposts.csv"), chunksize=10000, usecols=["Id", "QuestionUno", "PostText", "CreatedUtc"]):
         filtered_chunk = chunk.merge(question, on='QuestionUno', how='inner')
         chunks.append(filtered_chunk)
     post = pd.concat(chunks, ignore_index=True)
-    
-    post = post.merge(attorney_time, left_on='TakenByAttorneyUno', right_on='AttorneyUno', how='left')
 
     # Clean date
     clean_dates(post, "CreatedUtc")
-    clean_dates(post, "EnteredOnUtc")
+    clean_dates(attorney_time, "EnteredOnUtc")
 
-    return post
+    return post, attorney_time
 
 
-def preprocess_text(text_series):
+def preprocess_text(text_series: pd.Series) -> pd.Series:
     """
     Preprocess texts with following steps:
     # TODO: Updates this method
@@ -129,7 +127,7 @@ def preprocess_text(text_series):
     return pd.Series(tokenized_docs)
 
 
-def label_posts(post):
+def label_posts(post: pd.DataFrame, attorney_time: pd.DataFrame) -> pd.DataFrame:
     """
     Identifies post as attorney or client based on three criteria:
     1. Time-based matching with attorney time entries.
@@ -138,29 +136,30 @@ def label_posts(post):
 
     Args:
         post (pd.DataFrame): DataFrame containing posts.
+        attorney_time (pd.DataFrame): DataFrame containing attorney time entries.
 
-    Updates:
-        Updates the 'WhosePost' column in the 'post' DataFrame in place.
+    Returns:
+        pd.DataFrame: a new post dataframe with WhosePost label.
     """
     # Time-based matching with attorney time entries
-    print("time-based")
-    time_diff = post['EnteredOnUtc'] - post['CreatedUtc']
-    within_time_frame = time_diff.abs() <= pd.Timedelta(minutes=1)
-    post['WhosePost'] = np.where(within_time_frame, 1, np.nan)
+    merged = post[['Id', 'TakenByAttorneyUno', 'CreatedUtc']].merge(attorney_time, left_on='TakenByAttorneyUno', right_on='AttorneyUno', how='left')
+    merged['TimeDiff'] = (merged['EnteredOnUtc'] - merged['CreatedUtc']).abs()
+    min_time_diff = merged.groupby(['Id'])['TimeDiff'].min().reset_index()
+    min_time_diff['WhosePost'] = np.where(min_time_diff['TimeDiff'] <= pd.Timedelta(minutes=1), 1, np.nan)
+    post = post.merge(min_time_diff[['Id', 'WhosePost']], on='Id', how='left')
 
     # Identification of the first post for each question
-    print("position-based")
     first_posts = post.groupby('QuestionUno')['CreatedUtc'].idxmin()
     post.loc[post.index.isin(first_posts), 'WhosePost'] = 0
 
     # Comparison of attorney and client word counts
-    print("word-based")
     unlabeled = post['WhosePost'].isna()
     post.loc[unlabeled, 'WhosePost'] = post.loc[unlabeled, 'CleanedText'].apply(count_att_cli_words)
 
     # Join the token list back to text
     post['CleanedText'] = post['CleanedText'].apply(lambda d: " ".join(token for token in d))
 
+    return post
 
 def main(args):
     input_path = args.input_path
@@ -173,7 +172,7 @@ def main(args):
 
     # Prepare datasets
     print("Prepare Data\n")
-    post= prepare_datasets(input_path, nrows=nrows)
+    post, attorney_time = prepare_datasets(input_path, nrows=nrows)
 
     # Clean text
     print("Clean Data\n")
@@ -181,10 +180,10 @@ def main(args):
 
     # Label posts
     print("Label Posts\n")
-    label_posts(post)
+    post = label_posts(post, attorney_time)
 
     # Save new post DataFrame without index
-    post = post[["QuestionUno", "CleanedText", "WhosePost", "CategoryUno"]]
+    post = post[["Id", "QuestionUno", "CategoryUno", "CleanedText", "WhosePost"]]
     post.to_csv(os.path.join(output_path, "cleaned_posts.csv"), index=False)
 
 
@@ -196,6 +195,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
-
-
-
