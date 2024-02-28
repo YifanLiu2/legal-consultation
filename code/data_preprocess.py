@@ -4,8 +4,7 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 import nltk
-# from nltk.tokenize import word_tokenize
-# from nltk.stem import PorterStemmer
+from tqdm import tqdm
 import spacy
 nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
 
@@ -76,7 +75,7 @@ def prepare_datasets(filepath: str, nrows: int | None) -> tuple[pd.DataFrame]:
 
     Args:
         filepath (str): The directory path where the CSV files are located.
-        nrows (int | None): The number of rows to load from question dataset.
+        nrows (int | None): The number of rows to load from question dataset, positive integer.
 
     Returns:
         tuple: Merged posts DataFrame and attorney time DataFrame.
@@ -86,19 +85,25 @@ def prepare_datasets(filepath: str, nrows: int | None) -> tuple[pd.DataFrame]:
     """
     # Read data
     try:
-        question = pd.read_csv(os.path.join(filepath, "questions.csv"), index_col=0, nrows=nrows)
+        question = pd.read_csv(os.path.join(filepath, "questions.csv"), index_col=0)
+        if nrows:
+            question = question.sample(n=5)
         attorney_time = pd.read_csv(os.path.join(filepath, "attorneytimeentries.csv"), index_col=0, usecols=["AttorneyUno", "EnteredOnUtc"])
     except FileNotFoundError as e:
         print(f"Error reading files: {e}")
         return
-    question = question[["StateAbbr", "QuestionUno", "CategoryUno", "TakenByAttorneyUno"]]
+    question = question[["StateAbbr", "QuestionUno", "Category", "TakenByAttorneyUno"]]
     question = question[question['TakenByAttorneyUno'].notna()]
 
     chunks = []
-    for chunk in pd.read_csv(os.path.join(filepath, "questionposts.csv"), chunksize=10000, usecols=["Id", "QuestionUno", "PostText", "CreatedUtc"]):
-        filtered_chunk = chunk.merge(question, on='QuestionUno', how='inner')
-        chunks.append(filtered_chunk)
-    post = pd.concat(chunks, ignore_index=True)
+    try:
+        for chunk in pd.read_csv(os.path.join(filepath, "questionposts.csv"), chunksize=10000, usecols=["Id", "QuestionUno", "PostText", "CreatedUtc"]):
+            filtered_chunk = chunk.merge(question, on='QuestionUno', how='inner')
+            chunks.append(filtered_chunk)
+        post = pd.concat(chunks, ignore_index=True)
+    except FileNotFoundError as e:
+        print(f"Error reading files: {e}")
+        return
 
     # Clean date
     clean_dates(post, "CreatedUtc")
@@ -110,18 +115,17 @@ def prepare_datasets(filepath: str, nrows: int | None) -> tuple[pd.DataFrame]:
 def preprocess_text(text_series: pd.Series) -> pd.Series:
     """
     Preprocess texts with following steps:
-    # TODO: Updates this method
-    This function keeps tokens in list format for each posts.
+    This function keeps tokens in list format for each post.
 
     Args:
         text_series (pd.Series): A Series of text strings to preprocess.
 
     Returns:
-        pd.Series: A Series where each text string is replaced by a single string with stemmed and lowercased words.
+        pd.Series: A Series where each text string is replaced by a list of stemmed and lowercased words.
     """
-    # return text_series.apply(lambda text: ' '.join([stemmer.stem(word.lower()) for word in word_tokenize(text)]))
+    text_series = text_series.astype(str)
     tokenized_docs = []
-    for doc in nlp.pipe(text_series, n_process=-1):
+    for doc in tqdm(nlp.pipe(text_series, n_process=-1), total=len(text_series)):
         tokens = [token.lemma_.lower() for token in doc if not token.is_space]
         tokenized_docs.append(tokens)
     return pd.Series(tokenized_docs)
@@ -183,7 +187,7 @@ def main(args):
     post = label_posts(post, attorney_time)
 
     # Save new post DataFrame without index
-    post = post[["Id", "QuestionUno", "CategoryUno", "CleanedText", "WhosePost"]]
+    post = post[["Id", "QuestionUno", "Category", "CleanedText", "WhosePost"]]
     post.to_csv(os.path.join(output_path, "cleaned_posts.csv"), index=False)
 
 
