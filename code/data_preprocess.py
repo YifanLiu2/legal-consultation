@@ -83,7 +83,7 @@ def preprocess_text(text_series: pd.Series) -> pd.Series:
     symbols_to_remove = r'[^\w\s]'
     url_pattern = r'https?://\S+|www\.\S+'
     text_series = text_series.apply(lambda text: re.sub(url_pattern, ' url ', str(text)))
-    text_series = text_series.apply(lambda text: re.sub(symbols_to_remove, '', text))
+    text_series = text_series.apply(lambda text: re.sub(symbols_to_remove, '', str(text)))
     tokenized = []
     for doc in tqdm(nlp.pipe(text_series, n_process=-1), total=len(text_series)):
         tokens = [token.lemma_.lower() for token in doc if not token.is_space]
