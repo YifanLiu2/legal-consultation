@@ -7,7 +7,7 @@ import argparse
 import random
 
 # from config import API_KEY
-API_KEY = os.environ.get('api_key')
+API_KEY = os.environ.get('API_TOKEN')
 def classify_post(post):
     """
     Classifies a given post as written by an attorney or a client using OpenAI's API.
