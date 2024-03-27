@@ -1,11 +1,16 @@
 import argparse, os
 import pandas as pd
 import torch
+<<<<<<< HEAD
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer, BertForSequenceClassification, Trainer, TrainingArguments, BertModel, BertTokenizer
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
+=======
+from torch.utils.data import Dataset
+from transformers import AutoTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
+>>>>>>> a882c046d806af9d835c0ab53d7206d044931c26
 
 
 class PostsDataset(Dataset):
@@ -19,7 +24,11 @@ class PostsDataset(Dataset):
         posts = dataset["CleanedText"]
         if label_col not in dataset.columns:
             raise ValueError(f"'{label_col}' not found in dataset columns. Available columns are: {list(dataset.columns)}")
+<<<<<<< HEAD
         labels = dataset["WhosePost"]
+=======
+        labels = dataset[label_col]
+>>>>>>> a882c046d806af9d835c0ab53d7206d044931c26
         self.num_labels = len(labels.unique())
 
         self.encodings = self.tokenizer(posts.tolist(), truncation=True, padding=True, max_length=512, return_tensors="pt")
@@ -44,7 +53,11 @@ class QuestionDataset(Dataset):
 
         if label_col not in dataset.columns:
             raise ValueError(f"'{label_col}' not found in dataset columns. Available columns are: {list(dataset.columns)}")
+<<<<<<< HEAD
         labels = dataset["WhosePost"]
+=======
+        labels = dataset[label_col]
+>>>>>>> a882c046d806af9d835c0ab53d7206d044931c26
         self.num_labels = len(labels.unique())
         
         # concatenate all posts for the given question with [SEP] tokens
@@ -104,6 +117,7 @@ class ModelFineTuner:
 
         trainer.train()
 
+<<<<<<< HEAD
 
 class MultiAspectClassifier(nn.Module):
     def __init__(self):
@@ -215,6 +229,14 @@ def main(args):
     data_path = args.input
     output_dir = args.output
 
+=======
+
+def main(args):
+    model_path = args.model
+    data_path = args.input
+    output_dir = args.output
+
+>>>>>>> a882c046d806af9d835c0ab53d7206d044931c26
     if not os.path.exists(model_path):
         raise ValueError("Bad input path.")
     
@@ -237,6 +259,7 @@ def main(args):
 
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     # parser = argparse.ArgumentParser(description="Fine-tune a model on two sequential tasks.")
     # parser.add_argument("-i", "--input", type=str, default="data/cleaned_posts.csv", help="Path to the input data CSV file.")
     # parser.add_argument("-o", "--output", type=str, default="models/", help="Directory where outputs will be saved.")
@@ -257,4 +280,13 @@ if __name__ == "__main__":
     trainer = Trainer(model=model, dataset=dataset, batch_size=batch_size, learning_rate=learning_rate)
     trainer.train(num_epochs)
 
+=======
+    parser = argparse.ArgumentParser(description="Fine-tune a model on two sequential tasks.")
+    parser.add_argument("-i", "--input", type=str, default="data/cleaned_posts.csv", help="Path to the input data CSV file.")
+    parser.add_argument("-o", "--output", type=str, default="models/", help="Directory where outputs will be saved.")
+    parser.add_argument("-m", "--model", type=str, default="nlpaueb/legal-bert-base-uncased", help="Model path or identifier.")
 
+    args = parser.parse_args()
+>>>>>>> a882c046d806af9d835c0ab53d7206d044931c26
+
+    main(args)
